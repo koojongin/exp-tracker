@@ -1,0 +1,12 @@
+Maple EXP Meter uses these third-party components:
+Python https://www.python.org/ (PSF)
+RapidOCR https://github.com/RapidAI/RapidOCR
+ONNX Runtime https://github.com/microsoft/onnxruntime
+Pillow https://python-pillow.org/
+NumPy https://numpy.org/
+OpenCV https://opencv.org/
+Shapely https://shapely.readthedocs.io/
+Tcl/Tk https://www.tcl.tk/
+PyInstaller https://pyinstaller.org/
+EXP level data: https://meowdb.com/msclassic/guides/exp-table-level-1-to-100
+The application is unofficial and not affiliated with Nexon.
