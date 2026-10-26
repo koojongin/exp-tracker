@@ -3,6 +3,13 @@ import re
 
 
 EN = {
+    '처음 사용하거나 게임 해상도를 바꾸면 EXP·레벨 영역을 직접 지정하고 인식 시험을 하세요.':
+        'On first use or after changing game resolution, select BOTH EXP and level areas, then Test OCR.',
+    '레벨 영역 다시 지정': 'Re-select level area',
+    '레벨 인식 영역 미리보기': 'Level capture preview',
+    '인식 시험을 누르면 여기에 표시됩니다.': 'Click Test OCR to preview this area.',
+    '영역 지정이 취소되었거나 영역이 잘못되었습니다. 기존 설정을 유지합니다.':
+        'Selection cancelled or invalid. Previous capture area kept.',
     '세션 경과': 'Session time',
     '게임 창': 'Game window',
     '새로고침': 'Refresh',

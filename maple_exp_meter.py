@@ -21,7 +21,7 @@ import numpy as np
 from meter_core import Session, parse_exp, verify
 from i18n import translate
 
-VERSION = '1.9.0'
+VERSION = '1.9.1'
 
 BASE = Path(getattr(sys, '_MEIPASS', Path(__file__).parent))
 STORE = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'MapleExpMeter'
@@ -176,19 +176,30 @@ class Reader:
         level_raw='수동'
         if auto:
             if level_image is None:
-                raise ValueError('자동 레벨 영역이 필요합니다.')
-            level_raw,lc=self.text(level_image)
+                raise CaptureReadError('level','자동 레벨 영역이 필요합니다.')
+            try:level_raw,lc=self.text(level_image)
+            except ValueError as error:
+                raise CaptureReadError('level','레벨 숫자가 읽히지 않습니다. 레벨 영역을 다시 지정하세요.') from error
             digits=re.findall(r'\d{1,3}',level_raw)
             if lc<.75 or len(digits)!=1:
-                raise ValueError('레벨 숫자가 읽히지 않습니다. 레벨 영역을 다시 지정하세요.')
+                raise CaptureReadError('level','레벨 숫자가 읽히지 않습니다. 레벨 영역을 다시 지정하세요.')
             level=int(digits[0])
+            if not 1<=level<=99:
+                raise CaptureReadError('level','레벨 숫자가 읽히지 않습니다. 레벨 영역을 다시 지정하세요.')
         verify(level,exp,pct,CAPS)
         return dict(level=level,exp=exp,pct=pct,raw=raw,confidence=confidence,level_raw=level_raw)
+
+
+class CaptureReadError(ValueError):
+    def __init__(self,area,message):
+        super().__init__(message)
+        self.area=area
 
 
 class App:
     def __init__(self,root):
         self.root=root
+        self.first_run=not CONFIG.exists()
         self.config=load_config()
         self.language=self.config.get('language','ko')
         if self.language not in ('ko','en'):self.language=DEFAULT['language']
@@ -204,6 +215,8 @@ class App:
         self.settings={}
         self.last_image=None
         self.last_image_tk=None
+        self.last_level_image=None
+        self.last_level_image_tk=None
         self.rejected=0
         self.logpath=None
         self.latest=None
@@ -230,6 +243,7 @@ class App:
         self.root.after(500,self.refresh_display)
         self.root.after(100,self.watch_display)
         self.root.protocol('WM_DELETE_WINDOW',self.close)
+        if self.first_run:self.root.after(300,self.open_settings)
         threading.Thread(target=self.worker,daemon=True).start()
 
     def build(self):
@@ -264,6 +278,8 @@ class App:
         self.language_combo=ttk.Combobox(row,textvariable=self.language_var,values=['한국어','English'],state='readonly',width=12)
         self.language_combo.pack(side='left',padx=8)
         self.language_combo.bind('<<ComboboxSelected>>',self.change_language)
+        ttk.Label(settings,text='처음 사용하거나 게임 해상도를 바꾸면 EXP·레벨 영역을 직접 지정하고 인식 시험을 하세요.',
+                  wraplength=410,foreground='#f3cd83',font=self.fonts['tiny']).pack(fill='x',pady=(0,6))
         row=ttk.Frame(settings);row.pack(fill='x')
         ttk.Label(row,text='게임 창').pack(side='left')
         self.window_var=tk.StringVar();self.windows_combo=ttk.Combobox(row,textvariable=self.window_var,state='readonly',width=12);self.windows_combo.pack(side='left',padx=5,fill='x',expand=True)
@@ -292,7 +308,14 @@ class App:
         ttk.Button(tools,text='기록 폴더',command=lambda:os.startfile(LOGS)).pack(side='left',expand=True,fill='x')
         self.status=tk.StringVar(value='OCR 엔진을 준비하고 있습니다…')
         status_label=ttk.Label(main,textvariable=self.status,wraplength=460,foreground='#f3cd83');status_label.pack(anchor='w',pady=(1,5));self.wrap_labels.append(status_label)
+        self.repair_anchor=status_label
+        self.repair_row=ttk.Frame(main)
+        self.repair_row.pack(fill='x',before=status_label)
+        ttk.Button(self.repair_row,text='레벨 영역 다시 지정',command=lambda:self.select_roi('level_roi')).pack(fill='x')
+        self.repair_row.pack_forget()
         self.preview=ttk.Label(settings,text='EXP 인식 영역 미리보기',background='#263249');self.preview.pack(anchor='w',pady=(0,6))
+        ttk.Label(settings,text='레벨 인식 영역 미리보기',font=self.fonts['tiny']).pack(anchor='w')
+        self.level_preview=ttk.Label(settings,text='인식 시험을 누르면 여기에 표시됩니다.',background='#263249');self.level_preview.pack(anchor='w',pady=(0,6))
         percent_card=tk.Frame(main,bg='#183f3c',padx=9,pady=6);percent_card.pack(fill='x',pady=(0,4))
         tk.Label(percent_card,text='세션 획득률',bg='#183f3c',fg='#c5e9e2',font=self.fonts['body']).pack(side='left')
         percent_values=tk.Frame(percent_card,bg='#183f3c');percent_values.pack(side='right')
@@ -332,6 +355,7 @@ class App:
         self.start_button.configure(text=self.tr(start_text))
         self.status.set(self.tr(self.status_source))
         if self.last_image is not None:self.show_preview(self.last_image,force=True)
+        if self.last_level_image is not None:self.show_level_preview(self.last_level_image,force=True)
         self.refresh_display(schedule=False)
 
     def change_language(self,event=None):
@@ -434,12 +458,13 @@ class App:
     def worker(self):
         try:
             reader=Reader();capture=SmallScreenCapture();previous_key=None;previous_read=None
-            self.results.put(('status','준비 완료 · 저부하 캡처 / 게임 창 선택 후 인식 시험 또는 측정 시작을 누르세요.',None))
+            ready='처음 사용하거나 게임 해상도를 바꾸면 EXP·레벨 영역을 직접 지정하고 인식 시험을 하세요.' if self.first_run else '준비 완료 · 저부하 캡처 / 게임 창 선택 후 인식 시험 또는 측정 시작을 누르세요.'
+            self.results.put(('status',ready,None))
         except Exception as e:self.results.put(('fatal',str(e),None));return
         while not self.shutdown:
             if not self.running and not self.test_requested:time.sleep(.15);continue
             settings=dict(self.settings);generation=self.generation;testing=self.test_requested;self.test_requested=False
-            exp_image=None
+            exp_image=None;level_image=None
             try:
                 hwnd=settings.get('hwnd')
                 if not hwnd:raise ValueError('MapleStory 창을 찾지 못했습니다. 게임을 켠 뒤 창 새로고침을 누르세요.')
@@ -459,9 +484,9 @@ class App:
                 else:
                     data=reader.read(exp_image,level_image,settings['level'],settings['auto'])
                     previous_read=dict(data);previous_key=frame_key
-                data.update(now=time.monotonic(),wall=datetime.now().astimezone().isoformat(timespec='seconds'),testing=testing,image=exp_image)
+                data.update(now=time.monotonic(),wall=datetime.now().astimezone().isoformat(timespec='seconds'),testing=testing,image=exp_image,level_image=level_image)
                 self.results.put(('read',data,generation))
-            except Exception as e:self.results.put(('error',dict(message=str(e),image=exp_image),generation))
+            except Exception as e:self.results.put(('error',dict(message=str(e),image=exp_image,level_image=level_image,area=getattr(e,'area',None)),generation))
             until=time.monotonic()+settings.get('interval',2)
             while time.monotonic()<until and not self.shutdown:
                 if self.test_requested:break
@@ -478,10 +503,16 @@ class App:
                 elif kind=='gap':self.session.gap();self.set_status(payload)
                 elif kind=='error':
                     self.rejected+=1;self.set_status(payload['message'])
+                    if payload.get('area')=='level' and self.auto.get():
+                        self.repair_row.pack(fill='x',before=self.repair_anchor)
+                    else:self.repair_row.pack_forget()
                     if payload.get('image') is not None:self.show_preview(payload['image'])
+                    if payload.get('level_image') is not None:self.show_level_preview(payload['level_image'])
                 elif kind=='read':
+                    self.repair_row.pack_forget()
                     self.latest=payload
                     self.show_preview(payload['image'])
+                    if payload.get('level_image') is not None:self.show_level_preview(payload['level_image'])
                     if payload['testing']:
                         self.set_status(f"인식 시험 OK · Lv.{payload['level']} / EXP {payload['exp']:,} [{payload['pct']:.2f}%]")
                     elif self.running:
@@ -500,6 +531,13 @@ class App:
         self.last_image_tk=ImageTk.PhotoImage(image.resize((max(1,int(image.width*scale)),max(1,int(image.height*scale)))))
         self.preview.configure(image=self.last_image_tk,text='')
 
+    def show_level_preview(self,image,force=False):
+        if not force and self.last_level_image is not None and image.size==self.last_level_image.size and image.tobytes()==self.last_level_image.tobytes():return
+        self.last_level_image=image
+        scale=min(3,round(45*self.ui_scale)/max(1,image.height),200*self.ui_scale/max(1,image.width))
+        self.last_level_image_tk=ImageTk.PhotoImage(image.resize((max(1,int(image.width*scale)),max(1,int(image.height*scale)))))
+        self.level_preview.configure(image=self.last_level_image_tk,text='')
+
     def toggle(self):
         self.refresh_settings();self.generation+=1
         self.running=not self.running
@@ -509,6 +547,7 @@ class App:
 
     def reset(self):
         self.generation+=1;self.session.reset();self.logpath=None;self.rejected=0
+        self.repair_row.pack_forget()
         self.set_status('초기화 완료 · 다음 정상 인식값부터 새 측정을 시작합니다.')
         self.refresh_display(schedule=False)
 
@@ -536,12 +575,17 @@ class App:
         canvas.create_text(w//2,50,text=self.tr(text),fill='white',font=('맑은 고딕',19,'bold'))
         selected={}
         def finish(event=None,cancel=False):
+            saved=False
             if not cancel and 'start' in selected and event:
                 ax,ay=selected['start'];bx,by=event.x_root,event.y_root
                 left,right=sorted([ax,bx]);top,bottom=sorted([ay,by]);rx,ry,rr,rb=rect
                 if right-left>=10 and bottom-top>=8 and left>=rx and top>=ry and right<=rr and bottom<=rb:
                     self.config[key]=[(left-rx)/(rr-rx),(top-ry)/(rb-ry),(right-rx)/(rr-rx),(bottom-ry)/(rb-ry)]
-            overlay.destroy();self.root.deiconify();self.running=was_running;self.refresh_settings();self.set_status('영역 지정 완료 · 인식 시험으로 확인하세요.')
+                    saved=True
+            overlay.destroy();self.root.deiconify();self.running=was_running;self.refresh_settings()
+            if saved:
+                self.repair_row.pack_forget();self.request_test()
+            else:self.set_status('영역 지정이 취소되었거나 영역이 잘못되었습니다. 기존 설정을 유지합니다.')
         def down(e):selected['start']=(e.x_root,e.y_root);selected['box']=canvas.create_rectangle(e.x,e.y,e.x,e.y,outline='#69f5c5',width=3)
         def motion(e):
             if 'start' in selected:

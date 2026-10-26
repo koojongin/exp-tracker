@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.1 — 2026-10-27
+
+- Added first-run capture setup guidance: default areas may not match another resolution or HUD layout.
+- Added a level capture preview alongside the EXP preview in Settings.
+- Added a main-window **Re-select level area** shortcut on level OCR failure.
+- Automatically test OCR after a valid area selection; preserve the previous area on cancellation or invalid selection.
+- Kept unreadable levels rejected instead of silently substituting a level.
+
 ## 1.9.0 — 2026-10-27
 
 - Added an instant Korean/English language switch in Settings, with a saved preference.

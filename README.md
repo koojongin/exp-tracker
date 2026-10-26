@@ -6,7 +6,7 @@ A compact Windows desktop EXP tracker that reads the visible EXP number and perc
 
 ## Download
 
-Download **ExpTracker-v1.9.0-windows-x64.exe** from the [latest release](https://github.com/koojongin/exp-tracker/releases/latest). Run it directly; Python is not required.
+Download **ExpTracker-v1.9.1-windows-x64.exe** from the [latest release](https://github.com/koojongin/exp-tracker/releases/latest). Run it directly; Python is not required.
 
 Windows 10/11, 64-bit. This is an unsigned executable.
 
@@ -19,6 +19,8 @@ Windows 10/11, 64-bit. This is an unsigned executable.
 5. Choose **Language / 언어 → English** or **한국어** in Settings. The choice is saved and takes effect immediately, including during a session.
 
 **Start / Pause**, **Reset**, session time and statistics stay on the compact main window. Capture settings, preview and CSV export are in Settings. The default main window is 360 × 440 at 100% scaling and adapts to monitor DPI.
+
+**If the level is not detected:** click **Re-select level area**, then drag around the level number only, excluding `LV`. OCR is tested automatically after a valid selection. Settings shows separate EXP and level capture previews. Default areas are only a starting point; select both areas for your own game layout. Settings opens automatically on a new installation. Alternatively, turn off Auto level and enter the correct level manually; update it yourself after leveling up.
 
 ## Statistics
 

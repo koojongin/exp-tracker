@@ -28,6 +28,43 @@ class TranslationTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == 'win32', 'Windows desktop GUI required')
 class LanguageSwitchTests(unittest.TestCase):
+    def test_level_failure_offers_repair_and_success_clears_it(self):
+        import tkinter as tk
+        from PIL import Image
+        import maple_exp_meter as app
+        with tempfile.TemporaryDirectory() as temp:
+            with patch.object(app,'CONFIG',Path(temp)/'config.json'), patch.object(app,'load_config',return_value={**app.DEFAULT,'language':'en'}), patch.object(app.App,'worker',lambda self:None):
+                root=tk.Tk();meter=app.App(root)
+                try:
+                    root.update();image=Image.new('RGB',(50,20),'white')
+                    meter.results.put(('error',dict(message='레벨 숫자가 읽히지 않습니다. 레벨 영역을 다시 지정하세요.',image=image,level_image=image,area='level'),meter.generation))
+                    meter.poll();root.update()
+                    self.assertEqual(meter.repair_row.winfo_manager(),'pack')
+                    self.assertIsNotNone(meter.last_level_image_tk)
+                    self.assertIn('Select the level area again',meter.status.get())
+                    self.assertIsNone(meter.session.started)
+                    meter.results.put(('read',dict(level=30,exp=43734,pct=45.70,testing=True,image=image,level_image=image),meter.generation))
+                    meter.poll();root.update()
+                    self.assertFalse(meter.repair_row.winfo_manager())
+                    self.assertIn('OCR test OK',meter.status.get())
+                    self.assertIsNone(meter.session.started)
+                finally:
+                    meter.shutdown=True
+                    for callback in root.tk.call('after','info'):root.after_cancel(callback)
+                    root.destroy()
+
+    def test_unreadable_level_is_identified_without_fallback(self):
+        import maple_exp_meter as app
+        reader=app.Reader.__new__(app.Reader)
+        for failure in [ValueError('OCR이 숫자를 찾지 못했습니다.'),('LV ? 0',0.9),('999',0.99),('30',0.2)]:
+            with self.subTest(failure=failure), patch.object(reader,'text',side_effect=[('43,734 [45.70%]',.99),failure]):
+                with self.assertRaises(app.CaptureReadError) as caught:
+                    reader.read(object(),object(),30,True)
+                self.assertEqual(caught.exception.area,'level')
+        with patch.object(reader,'text',return_value=('43,734 [45.70%]',.99)):
+            result=reader.read(object(),None,30,False)
+            self.assertEqual(result['level'],30)
+
     def test_live_switch_preserves_session_and_persists_choice(self):
         import tkinter as tk
         import maple_exp_meter as app
@@ -67,6 +104,7 @@ class LanguageSwitchTests(unittest.TestCase):
                     self.assertEqual(meter.session_exp.get(),'+0 EXP')
                 finally:
                     meter.shutdown=True
+                    for callback in root.tk.call('after','info'):root.after_cancel(callback)
                     root.destroy()
 
 
